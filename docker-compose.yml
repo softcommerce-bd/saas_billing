@@ -1,0 +1,72 @@
+# Production-like local stack. Copy infra/deployment/stack.env.example to
+# infra/deployment/stack.env and fill in secrets before `docker compose up`.
+name: smartbill
+
+x-api: &api
+  build:
+    context: .
+    dockerfile: infra/docker/api/Dockerfile
+  image: smartbill-api:local
+  env_file: infra/deployment/stack.env
+  depends_on:
+    postgres: { condition: service_healthy }
+    redis: { condition: service_healthy }
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: smartbill
+      POSTGRES_USER: smartbill
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-locally}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U smartbill -d smartbill"]
+      interval: 5s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes: [redisdata:/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 20
+    restart: unless-stopped
+
+  api:
+    <<: *api
+    volumes: [apistorage:/var/www/api/storage/app]
+
+  queue:
+    <<: *api
+    command: ["php", "artisan", "queue:work", "redis", "--sleep=1", "--tries=3", "--max-time=3600"]
+    volumes: [apistorage:/var/www/api/storage/app]
+
+  scheduler:
+    <<: *api
+    command: ["php", "artisan", "schedule:work"]
+
+  web:
+    build:
+      context: .
+      dockerfile: infra/docker/web/Dockerfile
+    image: smartbill-web:local
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:1.27-alpine
+    ports: ["8080:80"]
+    volumes:
+      - ./infra/docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./apps/api/public:/var/www/api/public:ro
+    depends_on: [api, web]
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
+  apistorage:

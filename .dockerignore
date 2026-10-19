@@ -1,0 +1,10 @@
+.git
+**/node_modules
+**/.next
+**/vendor
+apps/api/.env
+apps/api/storage/logs/*
+apps/api/storage/framework/**/*
+apps/web/.env*
+apps/web/test-results
+infra/deployment/stack.env
